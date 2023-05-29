@@ -554,6 +554,32 @@ def notification():
     return jsonify(response_object)
 
 
+@app.route('/search_history', methods=['POST'])
+def search_history():
+    response_object = {'status': 'success'}
+    try:
+        conn = engine.connect()
+    except:
+        response_object['status'] = "connect failure"
+    user_id = request.get_json().get("user_id")
+    try:
+        historySort = f"""
+        SELECT * FROM search_history
+        WHERE user_id={user_id}
+        ORDER BY search_time DESC
+        LIMIT 3;
+        """
+        result = conn.execute(text(historySort))
+        cols = list(result.keys())
+        data = [dict(zip(cols, row)) for row in result.fetchall()]
+        response_object['items'] = data
+    except:
+        response_object['status'] = "history fetch failure"
+    result.close()
+    conn.close()
+    return jsonify(response_object)
+
+
 @app.route('/search', methods=['POST'])
 def search():
 
@@ -565,10 +591,37 @@ def search():
 
     global search_content
     search_content = request.get_json().get("search_content")
-    S_DATA = []
-
+    user_id = request.get_json().get("user_id")
     try:
-        searchResult = f"""SELECT * FROM project;"""
+        isSame = f"""
+        SELECT COUNT(*) FROM search_history
+        WHERE user_id={user_id} AND search_content="{search_content}" """
+        result1 = conn.execute(text(isSame))
+        is_same = result1.fetchall()[0][0]
+
+        if is_same == 0:
+            nextID = f"""SELECT COUNT(*)+1 FROM search_history"""
+            result2 = conn.execute(text(nextID))
+            next_id = result2.fetchall()[0][0]
+            historyWrite = f"""
+            INSERT INTO search_history (id,user_id,search_content,search_time)
+            VALUES ({next_id},{user_id},"{search_content}",NOW())
+            """
+            result2.close()
+        else:
+            historyWrite = f"""
+            UPDATE search_history
+            SET search_time=NOW()
+            WHERE user_id={user_id} AND search_content="{search_content}";
+            """
+        conn.execute(text(historyWrite))
+        conn.execute(text("COMMIT;"))
+    except:
+        response_object['status'] = "history insert failure"
+
+    S_DATA = []
+    try:
+        searchResult = f"""SELECT * FROM project WHERE user_id={user_id};"""
 
         result = conn.execute(text(searchResult))
         cols = list(result.keys())
@@ -585,6 +638,7 @@ def search():
         response_object['status'] = "algorithm failure"
 
     result.close()
+    result1.close()
     conn.close()
 
     return jsonify(response_object)
