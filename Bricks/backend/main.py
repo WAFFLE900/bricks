@@ -6,6 +6,7 @@ import hashlib
 import jwt
 import logging
 import os
+from models import db, Delete, Group, GroupMember, Mention, Notification, Problem, Project, ProjectSort, Record, SearchHistory, Tag,  TagTextBox, TextBox, User
 from sqlalchemy import create_engine, text
 from time import time
 
@@ -17,10 +18,9 @@ db_host = os.environ.get('DB_HOST')
 db_port = os.environ.get('DB_PORT')
 db_name = os.environ.get('DB_NAME')
 
-
 app = Flask(__name__)
-CORS(app, resources={r"/*": {'origins': "*"}})
 app.config['SECRET_KEY'] = 'secret'
+CORS(app, resources={r"/*": {'origins': "*"}})
 
 #連線到伺服器上的 MySQL
 db_url = f"mysql+pymysql://{db_username}:{db_password}@{db_host}:{db_port}/{db_name}"
@@ -28,6 +28,8 @@ engine = create_engine(db_url)
 
 app.config.from_object(__name__)
 auth = HTTPTokenAuth(scheme='Bearer')
+app.config['SQLALCHEMY_DATABASE_URI'] = db_url
+db.init_app(app)
 
 #hash password
 def hash_password(password):
@@ -47,31 +49,17 @@ def verify_token(token):
                           algorithms=['HS256'])
     except:
         return False
-    # return True
 
-    selectUserEmail = f""""
+    selectUserEmail = f"""
         SELECT user_email FROM users
-        WHERE user_email = "{data['user_email']}";
+        WHERE user_email = '{data['user_email']}';
     """
     ret = conn.execute(text(selectUserEmail))
     ret_list = ret.fetchall()
     if ret_list is None:
         return False
-    return data['user_email']
-
-DATA = [
-    {
-    'account':'RuCiCa',
-    'password': 'RuCiCa0307'
-    }
-]
-
-DATA = [
-    {
-    'account':'RuCiCa',
-    'password': 'RuCiCa0307'
-    }
-]
+    ret = User.query.filter_by(user_email = data['user_email']).one()
+    return ret.id
 
 
 # hello world route
@@ -98,7 +86,7 @@ def login():
 
     #取得檔案
     post_data = request.get_json()
-
+    user_email = post_data.get("user_email")
     #對比信箱，如正確回傳 user_id
     try:
         selectUserId = f"""
@@ -108,8 +96,11 @@ def login():
         result = conn.execute(text(selectUserId))
         result_list = result.fetchall()
         response_object['user_id'] = result_list[0][0]
-        user_password = result_list[0][1]
-        if user_password != post_data.get("user_password"):
+        print(123)
+        ret = User.query.filter_by(user_email = user_email).one()
+        user_password = ret.user_password
+        print(user_password)
+        if user_password != hash_password(post_data.get("user_password")):
             response_object['status'] = "failure"
             response_object['message'] = "您的密碼不正確，請再試一次"
             return jsonify(response_object)
@@ -195,6 +186,7 @@ def register():
 
 #加入使用者資訊 #取出資訊如果為list 要轉字串
 @app.route('/register/survey', methods=['POST'])
+@auth.login_required
 def register_survey():
     response_object = {'status': 'success'}
     response_object['message'] = "使用者調查註冊成功"
@@ -208,15 +200,15 @@ def register_survey():
     try:
         addInfo = f"""
             UPDATE users
-            SET user_purpose = "{",".join(post_data.get("user_purpose"))}", user_identity = "{(post_data.get("user_identity"))}", user_otherTool = "{",".join(post_data.get("user_otherTool"))}" 
-            WHERE id = {(post_data.get("user_id"))};
+            SET user_purpose = "{",".join((User.query.filter_by(user_purpose=post_data.get("user_purpose")).one()).user_purpose)}", user_identity = "{(post_data.get("user_identity"))}", user_otherTool = "{",".join(post_data.get("user_otherTool"))}" 
+            WHERE id = {(auth.current_user())};
         """
         conn.execute(text(addInfo))
         conn.execute(text("COMMIT;"))
 
         selectId = f"""
             SELECT user_email FROM users
-            WHERE id = {(post_data.get("user_id"))};
+            WHERE id = {(auth.current_user())};
         """
         result = conn.execute(text(selectId))
         response_object['user_email'] = result.fetchall()[0][0]
@@ -231,23 +223,19 @@ def register_survey():
 
 
 @app.route('/project_index', methods=['POST'])
+@auth.login_required
 def get_project():
     conn = engine.connect()
     response_object = {"status": "success"}
     post_data = request.get_json()
+    user_id = auth.current_user()
     found = False
-    
+
     if post_data.get("project_status") == "normal":
         nor_query = """
-                    SELECT p.*
-                    FROM project p
-                    JOIN project_sort ps ON p.project_type = ps.project_type
-                    WHERE p.user_id = {}
-                    AND p.project_trashcan = 0
-                    AND p.project_ended = 0
-                    AND ps.user_id = {}
-                    ORDER BY ps.project_type_sort ASC, p.project_edit_date DESC;
-                """.format(post_data.get("user_id"), post_data.get("user_id"))
+                    SELECT * FROM project WHERE user_id = {} AND project_trashcan = 0 AND project_ended = 0
+                    ORDER BY project_type;
+                """.format(user_id)
         SQL_data = conn.execute(text(nor_query))
         keys = list(SQL_data.keys())
         data = [dict(zip(keys, row)) for row in SQL_data.fetchall()]
@@ -258,15 +246,9 @@ def get_project():
 
     if post_data.get("project_status") == "ended":
         end_query = """
-                    SELECT p.*
-                    FROM project p
-                    JOIN project_sort ps ON p.project_type = ps.project_type
-                    WHERE p.user_id = {}
-                    AND p.project_trashcan = 0
-                    AND p.project_ended = 1
-                    AND ps.user_id = {}
-                    ORDER BY ps.project_type_sort ASC, p.project_edit_date DESC;
-                """.format(post_data.get("user_id"), post_data.get("user_id"))
+                    SELECT * FROM project WHERE user_id = {} AND project_trashcan = 0 AND project_ended = 1
+                    ORDER BY project_type;
+                """.format(user_id)
         SQL_data = conn.execute(text(end_query))
         keys = list(SQL_data.keys())
         data = [dict(zip(keys, row)) for row in SQL_data.fetchall()]
@@ -274,37 +256,18 @@ def get_project():
         response_object["items"] = data
         conn.close()
 
-
     if post_data.get("project_status") == "trashcan":
-        month_query = """
-                    SELECT *
-                    FROM project
-                    WHERE user_id = {} AND project_trashcan = 1
-                        AND project_edit_date >= DATE_SUB(NOW(), INTERVAL 1 MONTH)
-                    ORDER BY project_edit_date DESC;
-                """.format(post_data.get("user_id"))
-        not_month_query = """
-                    SELECT *
-                    FROM project
-                    WHERE user_id = {} AND project_trashcan = 1
-                        AND project_edit_date < DATE_SUB(NOW(), INTERVAL 1 MONTH)
-                    ORDER BY project_edit_date DESC;
-        """.format(post_data.get("user_id"))
-
-        month = conn.execute(text(month_query))
-        keys = list(month.keys())
-        month_data = [dict(zip(keys, row)) for row in month.fetchall()]
-
-        not_month = conn.execute(text(not_month_query))
-        keys = list(not_month.keys())
-        not_month_data = [dict(zip(keys, row)) for row in not_month.fetchall()]
-
+        trash_query = """
+                    SELECT * FROM project WHERE user_id = {} AND project_trashcan = 1
+                    ORDER BY project_type;
+                """.format(user_id)
+        SQL_data = conn.execute(text(trash_query))
+        keys = list(SQL_data.keys())
+        data = [dict(zip(keys, row)) for row in SQL_data.fetchall()]
         found = True
-        response_object["in_month"] = month_data
-        response_object["not_in_month"] = not_month_data
+        response_object["items"] = data
         conn.close()
-        response_object["message"] = "垃圾桶"
-    
+
     if found == False:
         response_object["status"] = "failed"
         response_object["message"] = "沒找到"
@@ -312,7 +275,7 @@ def get_project():
     return jsonify(response_object)
 
 
-@app.route("/set_project_end", methods=["POST"])
+@app.route('/set_project_end', methods=['POST'])
 def set_end():
     response_object = {"status": "success"}
     try:
@@ -334,28 +297,34 @@ def set_end():
 
 
 @app.route('/add_project', methods=['POST'])
+@auth.login_required
 def add_project():
     response_object = {"status": "success"}
     try:
         conn = engine.connect()
         post_data = request.get_json()
 
-
-
         Inquery = """
             INSERT INTO project (project_type, project_image, project_name, project_trashcan, project_ended, project_edit, project_visible, project_comment, user_id)
             VALUES 
             ("{}", "{}", "{}", {}, {}, {}, {}, {}, {});
-        """.format(post_data.get("project_type"), post_data.get("project_image"), post_data.get("project_name"), post_data.get("project_trashcan"), post_data.get("project_ended"), 
-                post_data.get("project_isEdit"), post_data.get("project_isVisible"), post_data.get("project_isComment"), post_data.get("user_id"))
-
+        """.format(post_data.get("project_type"),
+                   post_data.get("project_image"),
+                   post_data.get("project_name"),
+                   post_data.get("project_trashcan"),
+                   post_data.get("project_ended"),
+                   post_data.get("project_isEdit"),
+                   post_data.get("project_isVisible"),
+                   post_data.get("project_isComment"),
+                   auth.current_user())
 
         #執行SQL指令
         conn.execute(text(Inquery))
         conn.execute(text("COMMIT;"))
         #關閉連線
         conn.close()
-        response_object["message"] = "新增{}成功".format(post_data.get("project_name"))
+        response_object["message"] = "新增{}成功".format(
+            post_data.get("project_name"))
 
     except Exception as e:
         response_object["status"] = "failed"
@@ -364,63 +333,16 @@ def add_project():
     return jsonify(response_object)
 
 
-@app.route("/add_type", methods=["POST"])
+@app.route('/add_type', methods=['PUT'])
 def add_type():
-    response_object = {"status": "success"}
-    try:
-        conn = engine.connect()
-        post_data = request.get_json()
-
-        get_last_query = """
-                    SELECT MAX(project_type_sort) AS max_sort FROM project_sort
-                    WHERE user_id = {} AND project_ended = {};
-        """.format(post_data.get("user_id"), post_data.get("project_ended"))
-
-        last = conn.execute(text(get_last_query))
-        keys = list(last.keys())
-        last = [dict(zip(keys, row)) for row in last.fetchall()]
-
-        get_last_id_query = """
-                    SELECT MAX(type_id) AS max_sort FROM project_sort
-                    WHERE user_id = {} AND project_ended = {};
-        """.format(post_data.get("user_id"), post_data.get("project_ended"))
-
-        last_id = conn.execute(text(get_last_id_query))
-        keys = list(last_id.keys())
-        last_id = [dict(zip(keys, row)) for row in last_id.fetchall()]
-
-        sort = last[0]["max_sort"] + 1
-        id = last_id[0]["max_sort"] + 1
-
-        Inquery = """
-            INSERT INTO project_sort (type_id, project_type, project_type_sort, user_id, project_ended)
-            VALUES 
-            ({}, "{}", {}, {}, {});
-        """.format(id, post_data.get("project_type"), sort, post_data.get("user_id"), post_data.get("project_ended"))
-
-        #執行SQL指令
-        conn.execute(text(Inquery))
-        conn.execute(text("COMMIT;"))
-        #關閉連線
-        conn.close()
-        response_object["message"] = "新增成功"
-
-    except Exception as e:
-        response_object["status"] = "failed"
-        response_object["message"] = str(e)
-
-    return jsonify(response_object)
-
-
-@app.route("/edit_type", methods=["POST"])
-def set_type():
     response_object = {"status": "success"}
     try:
         conn = engine.connect()
         post_data = request.get_json()
         set_query = """
                         UPDATE project SET project_type = '{}' WHERE id = {};
-                    """.format(post_data.get("project_type"), post_data.get("project_id"))
+                    """.format(post_data.get("project_type"),
+                               post_data.get("project_id"))
         conn.execute(text(set_query))
         conn.execute(text("COMMIT;"))
         conn.close()
@@ -433,107 +355,37 @@ def set_type():
     return jsonify(response_object)
 
 
-@app.route("/trashcan_recover", methods=["POST"])
-def recover():
-    response_object = {"status": "success"}
-    try:
-        conn = engine.connect()
-        post_data = request.get_json()
-        set_query = """
-                        UPDATE project SET project_trashcan = 0
-                        WHERE id = {};
-                    """.format(post_data.get("project_id"))
-        conn.execute(text(set_query))
-        conn.execute(text("COMMIT;"))
-        conn.close()
-        response_object["message"] = "修改成功"
-
-    except Exception as e:
-        response_object["status"] = "failed"
-        response_object["message"] = str(e)
-
-    return jsonify(response_object)
-
-
-@app.route("/type_reindex", methods=["POST"])
-def type_reindex():
-    response_object = {"status": "success"}
-    try:
-        conn = engine.connect()
-        post_data = request.get_json()
-        
-        for item in post_data.get("type_sort"):
-            id = item["id"]
-            project_type_sort = item["project_type_sort"]
-            requery = """
-            UPDATE project_sort SET project_type_sort = {} WHERE type_id = {} AND user_id = {} AND project_ended = {};
-            """.format(project_type_sort, id, post_data.get("user_id"), post_data.get("project_ended"))
-            conn.execute(text(requery))
-            print("sort:{}, type_id:{}, user_id:{}".format(project_type_sort, id, post_data.get("user_id")))
-        conn.execute(text("COMMIT;"))
-        conn.close()
-        response_object["message"] = "修改成功"
-
-    except Exception as e:
-        response_object["status"] = "failed"
-        response_object["message"] = str(e)
-
-    return jsonify(response_object)
-
-
-@app.route("/to_trashcan", methods=["POST"])
-def trashcan():
-    response_object = {"status": "success"}
-    try:
-        conn = engine.connect()
-        post_data = request.get_json()
-        set_query = """
-                        UPDATE project SET project_trashcan = 1
-                        WHERE id = {};
-                    """.format(post_data.get("project_id"))
-        conn.execute(text(set_query))
-        conn.execute(text("COMMIT;"))
-        conn.close()
-        response_object["message"] = "修改成功"
-
-    except Exception as e:
-        response_object["status"] = "failed"
-        response_object["message"] = str(e)
-
-    return jsonify(response_object)
-
-
-@app.route("/personal_setting", methods=["POST"])
+@app.route('/personal_setting', methods=['POST'])
+@auth.login_required
 def personal_setting():
     try:
         conn = engine.connect()
         response_object = {"status": "success"}
         post_data = request.get_json()
-        
+
         nor_query = """
                         SELECT * FROM users WHERE id = {};
-                    """.format(post_data.get("user_id"))
+                    """.format(auth.current_user())
         SQL_data = conn.execute(text(nor_query))
         keys = list(SQL_data.keys())
         data = [dict(zip(keys, row)) for row in SQL_data.fetchall()]
         conn.close()
         response_object["items"] = data
-    
+
     except Exception as e:
         response_object["status"] = "failed"
         response_object["message"] = str(e)
 
-    return jsonify(response_object)
-
 
 @app.route('/notification', methods=['POST'])
+@auth.login_required
 def notification():
     response_object = {'status': 'success'}
     try:
         conn = engine.connect()
     except:
         response_object['status'] = "connect failure"
-    user_id = request.get_json().get("user_id")
+    user_id = auth.current_user()
     try:
         notificationInfo = f"""SELECT *
         FROM notification
@@ -606,8 +458,6 @@ def lcs(data):
                 dp[i][j] = max(dp[i - 1][j], dp[i][j - 1])
 
     return dp[str2_len][str1_len]
-
-
 
 
 if __name__ == "__main__":
