@@ -186,7 +186,6 @@ def register():
 
 #加入使用者資訊 #取出資訊如果為list 要轉字串
 @app.route('/register/survey', methods=['POST'])
-@auth.login_required
 def register_survey():
     response_object = {'status': 'success'}
     response_object['message'] = "使用者調查註冊成功"
@@ -200,15 +199,15 @@ def register_survey():
     try:
         addInfo = f"""
             UPDATE users
-            SET user_purpose = "{",".join((User.query.filter_by(user_purpose=post_data.get("user_purpose")).one()).user_purpose)}", user_identity = "{(post_data.get("user_identity"))}", user_otherTool = "{",".join(post_data.get("user_otherTool"))}" 
-            WHERE id = {(auth.current_user())};
+            SET user_purpose = "{",".join(post_data.get("user_purpose"))}", user_identity = "{(post_data.get("user_identity"))}", user_otherTool = "{",".join(post_data.get("user_otherTool"))}" 
+            WHERE id = {(post_data.get("user_id"))};
         """
         conn.execute(text(addInfo))
         conn.execute(text("COMMIT;"))
 
         selectId = f"""
             SELECT user_email FROM users
-            WHERE id = {(auth.current_user())};
+            WHERE id = {(post_data.get("user_id"))};
         """
         result = conn.execute(text(selectId))
         response_object['user_email'] = result.fetchall()[0][0]
@@ -220,7 +219,6 @@ def register_survey():
 
     conn.close()
     return jsonify(response_object)
-
 
 @app.route('/project_index', methods=['POST'])
 @auth.login_required
