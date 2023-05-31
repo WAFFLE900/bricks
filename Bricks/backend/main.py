@@ -659,9 +659,7 @@ def lcs(data):
             else:
                 dp[i][j] = max(dp[i - 1][j], dp[i][j - 1])
 
-    return dp[str2_len][str1_len]
-
-
+    return dp[str2_len][str1_len]        
 
 
 if __name__ == "__main__":
