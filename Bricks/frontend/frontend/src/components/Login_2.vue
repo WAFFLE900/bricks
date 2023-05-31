@@ -79,6 +79,7 @@
 
 <script>
 import axios from 'axios';
+import { Base64 } from 'js-base64';
 export default {
     name: 'Login_2',
     data() {
@@ -90,6 +91,8 @@ export default {
             password: "",
             errorMessage: "",
             errorTime: 0,
+            token: "",
+            decode_token_json: "",
         };
     },
     methods: {
@@ -110,19 +113,27 @@ export default {
                 this.errorMessage = "請填寫您的帳號與密碼資訊";
                 // this.errorTime = this.errorTime + 1;
                 console.log("前端block");
+                this.error = true;
             } else {
-                const path = "http://localhost:5000/login";
-                const user = { account: this.account, password: this.password };
+                const path = "http://34.81.186.58:5000/login";
+                const user = { user_email: this.account, user_password: this.password, isKeepLogin: this.checked };
+                // console.log("user: ", user);
                 this.account = "";
                 this.password = "";
                 axios
                     .post(path, user)
                     .then((res) => {
-                        console.log(res.data.status);
-                        if (res.data.status == 'success') {
+                        // token 在 res.data裡面
+                        this.token = res.data;
+                        // 在Vue组件中的某个方法中执行解密操作
+                        this.decode_token_json = this.decodeToken(this.token);
+                        // 直接取出要的東西
+                        // console.log("decode_token_json: ", this.decode_token_json.status);
+
+                        if (this.decode_token_json.status == 'success') {
                             this.errorTime = 0;
                             console.log("登入成功");
-                            this.goToPersonalPage();
+                            this.$router.push({ name: 'Personal_homepage', params: { user_email: this.decode_token_json.user_email } });
 
                         } else {
                             // this.$refs.account.style = "border-color : #e03939";
@@ -136,21 +147,40 @@ export default {
                                 this.errorMessage = "如果登入時遇到困難，可點擊「忘記密碼」";
                                 this.errorTime = this.errorTime + 1;
                             } else {
+                                // 之後改成 this.decode_token_json.message
                                 this.errorMessage = "您的帳號或密碼不正確，請再試一次";
                             }
+                            this.error = true;
 
                         }
                     })
                     .catch((error) => {
                         console.log(error);
                     });
+
             }
-            this.error = true;
+
 
         },
         goToPersonalPage() {
             console.log("goToPersonalPage");
         },
+        decodeToken(token) {
+            // 获取Token的第二部分（Payload）
+            const encodedPayload = token.split('.')[1];
+
+            // 解码Base64字符串
+            const decodedPayload = Base64.decode(encodedPayload);
+
+            // 将解码后的字符串转换为JavaScript对象
+            const payloadObject = JSON.parse(decodedPayload);
+
+            // 现在您可以在payloadObject中访问解密后的Token数据
+            console.log(payloadObject);
+
+            // 返回解密后的Token数据，或进行其他后续处理
+            return payloadObject;
+        }
     },
     created() {
 

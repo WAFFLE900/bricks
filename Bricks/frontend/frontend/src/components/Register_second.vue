@@ -16,7 +16,7 @@
                 <p class="title">註冊</p>
                 <div class="select">
                     <div class="card" style="margin-top: 0px;">
-                        <p>一、使用 BRICKS 的用途 (多選) {{ userId }}</p>
+                        <p>一、使用 BRICKS 的用途 (多選) </p>
                         <div class="multiple_select">
                             <input type="checkbox" id="one_one" name="one" v-model="is_1_1_Checked">
                             <label for="one_one" style="margin-left: 0px;">課堂作業</label>
@@ -178,7 +178,8 @@ export default {
             axios
                 .post(path, user_survey)
                 .then((res) => {
-                    // console.log(res.data.user_email);
+
+                    console.log("有成功post", res);
                     if (res.data.status == 'success') {
                         this.user_email = res.data.user_email;
                         console.log("email ", res.data.user_email);
@@ -186,7 +187,7 @@ export default {
                         this.$router.push({ name: 'Personal_homepage', params: { user_email: this.user_email } });
                     } else {
                         console.log(res.data.user_email);
-                        console.log(this.user_survey);
+                        console.log("survey: ", this.user_survey);
 
                     }
 
