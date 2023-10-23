@@ -4,21 +4,13 @@
   </div>
 </template>
 
-<<<<<<< HEAD
-=======
-
->>>>>>> d452783 (蔡杞祥在試著Merge)
 <script>
 import axios from "axios";
 export default {
   name: "BricksTest", //should be multi-word
   data() {
     return {
-<<<<<<< HEAD
       msg: "Not Found",
-=======
-      msg: "Not Found", 
->>>>>>> d452783 (蔡杞祥在試著Merge)
     };
   },
   methods: {
