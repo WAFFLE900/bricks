@@ -1,0 +1,302 @@
+from __future__ import annotations
+
+import re
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from sqlalchemy.orm import Session, selectinload
+
+from app.api.deps import get_current_user
+from app.api.project_access import get_project_access, require_project_editor
+from app.db.session import get_db
+from app.models.entities import Notification, Project, ProjectMembership, Record, TextBox, User
+from app.schemas.record import RecordCreate, RecordRead, RecordTrashUpdate, RecordUpdate, TextBoxCreate, TextBoxRead, TextBoxUpdate
+
+router = APIRouter()
+
+MENTION_SUFFIX_PATTERN = r"(?=$|[\s,.;:!?，。；：！？、)\]}）】])"
+
+
+def _record_or_404(db: Session, record_id: int) -> Record:
+    record = (
+        db.query(Record)
+        .filter(Record.id == record_id)
+        .options(selectinload(Record.text_boxes).selectinload(TextBox.tags))
+        .first()
+    )
+    if record is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Record not found.")
+    return record
+
+
+def _serialize_record(record: Record) -> RecordRead:
+    tags = sorted({tag.tag_name for text_box in record.text_boxes for tag in text_box.tags})
+    text_boxes = [
+        TextBoxRead(
+            id=text_box.id,
+            textBox_content=text_box.textBox_content,
+            updated_at=text_box.updated_at,
+            tags=[tag.tag_name for tag in text_box.tags],
+        )
+        for text_box in record.text_boxes
+    ]
+    return RecordRead(
+        id=record.id,
+        record_name=record.record_name,
+        record_date=record.record_date,
+        record_department=record.record_department,
+        record_attendances=record.record_attendances,
+        record_place=record.record_place,
+        record_host_name=record.record_host_name,
+        record_trashcan=record.record_trashcan,
+        created_at=record.created_at,
+        updated_at=record.updated_at,
+        tags=tags,
+        text_boxes=text_boxes,
+    )
+
+
+def _project_users(project: Project) -> list[User]:
+    members = [project.user]
+    members.extend(item.user for item in project.memberships)
+    return members
+
+
+def _mention_aliases(user: User) -> list[str]:
+    aliases = [user.user_name.strip(), user.user_email.strip()]
+    email_prefix = user.user_email.split("@", 1)[0].strip()
+    if email_prefix:
+        aliases.append(email_prefix)
+
+    deduped: list[str] = []
+    seen = set()
+    for alias in aliases:
+        normalized = alias.casefold()
+        if not alias or normalized in seen:
+            continue
+        seen.add(normalized)
+        deduped.append(alias)
+    return deduped
+
+
+def _extract_mentioned_users(content: str | None, project: Project) -> list[User]:
+    if not content:
+        return []
+
+    mentioned: list[User] = []
+    seen_user_ids: set[int] = set()
+
+    for user in _project_users(project):
+        for alias in _mention_aliases(user):
+            pattern = rf"@{re.escape(alias)}{MENTION_SUFFIX_PATTERN}"
+            if re.search(pattern, content, flags=re.IGNORECASE):
+                if user.id not in seen_user_ids:
+                    mentioned.append(user)
+                    seen_user_ids.add(user.id)
+                break
+
+    return mentioned
+
+
+def _build_excerpt(content: str | None) -> str:
+    if not content:
+        return ""
+    return re.sub(r"\s+", " ", content).strip()[:80]
+
+
+def _notify_new_mentions(
+    db: Session,
+    *,
+    actor: User,
+    project: Project,
+    record: Record,
+    content: str | None,
+    previous_content: str | None = None,
+) -> None:
+    current_mentions = {user.id: user for user in _extract_mentioned_users(content, project) if user.id != actor.id}
+    previous_mentions = {user.id for user in _extract_mentioned_users(previous_content, project)}
+    new_user_ids = set(current_mentions) - previous_mentions
+    if not new_user_ids:
+        return
+
+    excerpt = _build_excerpt(content)
+    for user_id in new_user_ids:
+        user = current_mentions[user_id]
+        db.add(
+            Notification(
+                recipient_user_id=user.id,
+                actor_user_id=actor.id,
+                project_id=project.id,
+                notification_type="text_box_mention",
+                notification_title=f"{actor.user_name} 在會議記錄提及了你",
+                notification_body=f"專案《{project.project_name}》／《{record.record_name}》：{excerpt}",
+            )
+        )
+
+
+@router.get("/projects/{project_id}/records", response_model=list[RecordRead])
+def list_records(
+    project_id: int,
+    include_trashed: bool = Query(default=False),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> list[RecordRead]:
+    get_project_access(db, current_user.id, project_id)
+    query = (
+        db.query(Record)
+        .filter(Record.project_id == project_id)
+        .options(selectinload(Record.text_boxes).selectinload(TextBox.tags))
+        .order_by(Record.updated_at.desc())
+    )
+    if not include_trashed:
+        query = query.filter(Record.record_trashcan.is_(False))
+    return [_serialize_record(record) for record in query.all()]
+
+
+@router.post("/projects/{project_id}/records", response_model=RecordRead, status_code=status.HTTP_201_CREATED)
+def create_record(
+    project_id: int,
+    payload: RecordCreate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> RecordRead:
+    access = get_project_access(db, current_user.id, project_id)
+    require_project_editor(access)
+
+    record = Record(project_id=project_id, user_id=current_user.id, **payload.model_dump())
+    db.add(record)
+    db.commit()
+    db.refresh(record)
+    return _serialize_record(record)
+
+
+@router.get("/projects/{project_id}/records/{record_id}", response_model=RecordRead)
+def get_record(
+    project_id: int,
+    record_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> RecordRead:
+    get_project_access(db, current_user.id, project_id)
+    record = _record_or_404(db, record_id)
+    if record.project_id != project_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Record not found in project.")
+    return _serialize_record(record)
+
+
+@router.patch("/records/{record_id}", response_model=RecordRead)
+def update_record(
+    record_id: int,
+    payload: RecordUpdate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> RecordRead:
+    record = _record_or_404(db, record_id)
+    access = get_project_access(db, current_user.id, record.project_id)
+    require_project_editor(access)
+
+    for key, value in payload.model_dump(exclude_none=True).items():
+        setattr(record, key, value)
+    db.add(record)
+    db.commit()
+    db.refresh(record)
+    return _serialize_record(record)
+
+
+@router.patch("/records/{record_id}/trash", response_model=RecordRead)
+def update_record_trash(
+    record_id: int,
+    payload: RecordTrashUpdate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> RecordRead:
+    record = _record_or_404(db, record_id)
+    access = get_project_access(db, current_user.id, record.project_id)
+    require_project_editor(access)
+
+    record.record_trashcan = payload.in_trash
+    db.add(record)
+    db.commit()
+    db.refresh(record)
+    return _serialize_record(record)
+
+
+@router.delete("/records/{record_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_record(
+    record_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> Response:
+    record = _record_or_404(db, record_id)
+    access = get_project_access(db, current_user.id, record.project_id)
+    require_project_editor(access)
+
+    db.delete(record)
+    db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post("/records/{record_id}/text-boxes", response_model=TextBoxRead, status_code=status.HTTP_201_CREATED)
+def create_text_box(
+    record_id: int,
+    payload: TextBoxCreate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> TextBoxRead:
+    record = _record_or_404(db, record_id)
+    access = get_project_access(db, current_user.id, record.project_id)
+    require_project_editor(access)
+
+    text_box = TextBox(record_id=record_id, **payload.model_dump())
+    db.add(text_box)
+    db.flush()
+    _notify_new_mentions(
+        db,
+        actor=current_user,
+        project=access.project,
+        record=record,
+        content=text_box.textBox_content,
+    )
+    db.commit()
+    db.refresh(text_box)
+    return TextBoxRead(id=text_box.id, textBox_content=text_box.textBox_content, updated_at=text_box.updated_at, tags=[])
+
+
+@router.patch("/text-boxes/{text_box_id}", response_model=TextBoxRead)
+def update_text_box(
+    text_box_id: int,
+    payload: TextBoxUpdate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> TextBoxRead:
+    text_box = (
+        db.query(TextBox)
+        .options(selectinload(TextBox.tags), selectinload(TextBox.record))
+        .filter(TextBox.id == text_box_id)
+        .first()
+    )
+    if text_box is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Text box not found.")
+
+    access = get_project_access(db, current_user.id, text_box.record.project_id)
+    require_project_editor(access)
+
+    previous_content = text_box.textBox_content
+    text_box.textBox_content = payload.textBox_content
+    db.add(text_box)
+    db.flush()
+    _notify_new_mentions(
+        db,
+        actor=current_user,
+        project=access.project,
+        record=text_box.record,
+        content=text_box.textBox_content,
+        previous_content=previous_content,
+    )
+    db.commit()
+    db.refresh(text_box)
+    return TextBoxRead(
+        id=text_box.id,
+        textBox_content=text_box.textBox_content,
+        updated_at=text_box.updated_at,
+        tags=[tag.tag_name for tag in text_box.tags],
+    )

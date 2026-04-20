@@ -1,0 +1,103 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: bricks-postgres
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-bricks}
+      POSTGRES_USER: ${POSTGRES_USER:-bricks}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-bricks}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-bricks} -d ${POSTGRES_DB:-bricks}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+
+  api:
+    build:
+      context: ./apps/api
+    container_name: bricks-api
+    environment:
+      APP_ENV: ${APP_ENV:-development}
+      SECRET_KEY: ${SECRET_KEY:-change-me}
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-bricks}:${POSTGRES_PASSWORD:-bricks}@postgres:5432/${POSTGRES_DB:-bricks}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173,http://localhost:8080}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      GOOGLE_REDIRECT_URI: ${GOOGLE_REDIRECT_URI:-http://localhost:8000/api/v1/auth/google/callback}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+
+  web:
+    build:
+      context: ./apps/web
+      args:
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:8000/api/v1}
+        VITE_GOOGLE_CLIENT_ID: ${VITE_GOOGLE_CLIENT_ID:-}
+    container_name: bricks-web
+    depends_on:
+      - api
+    ports:
+      - "8080:80"
+
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: bricks-pgadmin
+    profiles:
+      - pgadmin
+    entrypoint:
+      - /bin/sh
+      - -ec
+      - |
+        cp /config/pgpass /var/lib/pgadmin/pgpass
+        chmod 0600 /var/lib/pgadmin/pgpass
+        exec /entrypoint.sh
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_DEFAULT_EMAIL:-pgadmin4@pgadmin.org}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_DEFAULT_PASSWORD:-bricks-pgadmin}
+      PGADMIN_CONFIG_SERVER_MODE: "False"
+      PGADMIN_REPLACE_SERVERS_ON_STARTUP: "True"
+      PGPASS_FILE: /var/lib/pgadmin/pgpass
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "${PGADMIN_PORT:-5050}:80"
+    volumes:
+      - pgadmin-data:/var/lib/pgadmin
+    configs:
+      - source: pgadmin-servers
+        target: /pgadmin4/servers.json
+      - source: pgadmin-pgpass
+        target: /config/pgpass
+
+volumes:
+  postgres-data:
+  pgadmin-data:
+
+configs:
+  pgadmin-servers:
+    content: |
+      {
+        "Servers": {
+          "1": {
+            "Name": "Local Postgres",
+            "Group": "Servers",
+            "Host": "postgres",
+            "Port": 5432,
+            "MaintenanceDB": "${POSTGRES_DB:-bricks}",
+            "Username": "${POSTGRES_USER:-bricks}",
+            "SSLMode": "prefer",
+            "PassFile": "/var/lib/pgadmin/pgpass"
+          }
+        }
+      }
+  pgadmin-pgpass:
+    content: |
+      postgres:5432:*:${POSTGRES_USER:-bricks}:${POSTGRES_PASSWORD:-bricks}
