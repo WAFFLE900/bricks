@@ -10,6 +10,12 @@ from app.models.base import Base
 settings = get_settings()
 
 
+def _normalize_database_url(database_url: str) -> str:
+    if database_url.startswith("postgresql://"):
+        return database_url.replace("postgresql://", "postgresql+psycopg://", 1)
+    return database_url
+
+
 def _engine_kwargs(database_url: str) -> dict:
     if database_url in {"sqlite://", "sqlite:///:memory:"}:
         return {"connect_args": {"check_same_thread": False}, "poolclass": StaticPool}
@@ -18,7 +24,8 @@ def _engine_kwargs(database_url: str) -> dict:
     return {}
 
 
-engine = create_engine(settings.database_url, future=True, **_engine_kwargs(settings.database_url))
+database_url = _normalize_database_url(settings.database_url)
+engine = create_engine(database_url, future=True, **_engine_kwargs(database_url))
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, future=True)
 
 

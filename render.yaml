@@ -30,12 +30,16 @@ services:
         sync: false
       - key: GOOGLE_REDIRECT_URI
         sync: false
-
-staticSites:
-  - name: bricks-web
+  - type: web
+    name: bricks-web
+    runtime: static
     rootDir: apps/web
     buildCommand: npm ci && npm run build
-    publishPath: dist
+    staticPublishPath: apps/web/dist
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
     envVars:
       - key: VITE_API_BASE_URL
         sync: false

@@ -1,33 +1,43 @@
-# Infrastructure
+# BRICKS 資料庫（Database）
 
-Render is the default PaaS target for the rewrite. The active infrastructure entrypoints are:
+## 入口
 
-- `docker-compose.yml` for local verification
-- `render.yaml` for Render Blueprint-style provisioning
+- 本地資料庫服務入口：`C:\bricks\docker-compose.yml`（`postgres` service）
+- migration 入口：`C:\bricks\apps\api\alembic\env.py`
+- migration 版本檔：`C:\bricks\apps\api\alembic\versions`
 
-## Local pgAdmin
+## 功能簡介
 
-`pgAdmin 4` is available as an optional local-only Docker Compose service. It is not part of the default stack and is not referenced by `render.yaml`.
+- 提供 BRICKS 主資料庫（PostgreSQL 16）
+- 持久化資料 volume：`postgres-data`
+- 由 Alembic 管理 schema 版本與升級
+- 支援選配 `pgAdmin`（`pgadmin` profile）供本機管理
 
-Start the default local stack:
+## 怎麼啟動
+
+### 啟動 PostgreSQL（本機）
 
 ```powershell
-docker compose up --build
+cd C:\bricks
+Copy-Item .env.example .env
+docker compose up -d postgres
 ```
 
-Start the local stack with pgAdmin:
+### 套用 migration
 
 ```powershell
-docker compose --profile pgadmin up --build
+cd C:\bricks\apps\api
+uv sync
+$env:DATABASE_URL="postgresql+psycopg://bricks:bricks@localhost:5432/bricks"
+uv run alembic upgrade head
 ```
 
-Open pgAdmin in the browser at `http://localhost:5050` by default, or `http://localhost:${PGADMIN_PORT}` if you override the port in your local `.env`.
+### （選配）啟動 pgAdmin
 
-Default local pgAdmin credentials come from `.env` / `.env.example`:
+```powershell
+cd C:\bricks
+docker compose --profile pgadmin up -d pgadmin
+```
 
-- Email: `PGADMIN_DEFAULT_EMAIL`
-- Password: `PGADMIN_DEFAULT_PASSWORD`
-
-The preloaded pgAdmin server points at the Docker Compose PostgreSQL service named `postgres`, so it connects to the local database container rather than any remote or Render-managed database.
-
-This directory is reserved for future platform-specific assets such as observability, backup, and environment runbooks.
+- pgAdmin 預設網址：`http://localhost:5050`
+- 帳號密碼來源：`.env` 內的 `PGADMIN_DEFAULT_EMAIL` / `PGADMIN_DEFAULT_PASSWORD`
