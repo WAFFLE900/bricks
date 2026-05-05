@@ -1,11 +1,11 @@
-<template>
+﻿<template>
   <div class="register-page">
     <LegacyPublicHeader />
 
     <main class="register-page__body">
       <section class="register-card">
         <h1>註冊</h1>
-        <p class="register-card__lead">建立你的 BRICKS 帳號，沿用舊版熟悉的註冊體驗。</p>
+        <p class="register-card__lead">建立你的 BRICKS 帳號，開始管理你的專案與會議記錄。</p>
 
         <p v-if="errorMessage" class="register-card__error" role="alert">
           {{ errorMessage }}
@@ -16,7 +16,7 @@
             v-model="form.user_name"
             aria-label="Name"
             autocomplete="name"
-            placeholder="姓名"
+            placeholder="憪?"
             required
             type="text"
           />
@@ -24,7 +24,7 @@
             v-model="form.user_email"
             aria-label="Email"
             autocomplete="email"
-            placeholder="電子信箱"
+            placeholder="?餃?靽∠拳"
             required
             type="email"
           />
@@ -34,7 +34,7 @@
               v-model="form.user_password"
               aria-label="Password"
               autocomplete="new-password"
-              placeholder="密碼"
+              placeholder="撖Ⅳ"
               required
               :type="showPassword ? 'text' : 'password'"
             />
@@ -44,13 +44,12 @@
           </div>
 
           <button aria-label="Register" class="register-form__submit" :disabled="authStore.loading" type="submit">
-            建立帳號
+            撱箇?撣唾?
           </button>
         </form>
 
         <p class="register-card__switch">
-          已經有帳號了？
-          <RouterLink to="/login">回到登入</RouterLink>
+          撌脩??董??嚗?          <RouterLink to="/login">??餃</RouterLink>
         </p>
       </section>
     </main>
@@ -67,6 +66,7 @@ import eyeOffIconUrl from "@/assets/legacy/eye/eye_origin.svg";
 import eyeOnIconUrl from "@/assets/legacy/eye/eye_on.svg";
 import LegacyPublicFooter from "@/shared/ui/legacy/LegacyPublicFooter.vue";
 import LegacyPublicHeader from "@/shared/ui/legacy/LegacyPublicHeader.vue";
+import { getApiErrorMessage } from "@/shared/utils/getApiErrorMessage";
 import { useAuthStore } from "../stores/auth.store";
 
 const authStore = useAuthStore();
@@ -86,8 +86,8 @@ async function handleSubmit() {
   try {
     await authStore.register(form);
     await router.push({ name: "survey" });
-  } catch {
-    errorMessage.value = "註冊失敗，這個電子信箱可能已經被使用。";
+  } catch (error) {
+    errorMessage.value = getApiErrorMessage(error, "Registration failed. Please try again.");
   }
 }
 </script>
@@ -202,3 +202,6 @@ async function handleSubmit() {
   }
 }
 </style>
+
+
+
