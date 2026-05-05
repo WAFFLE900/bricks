@@ -35,7 +35,7 @@ services:
     runtime: static
     rootDir: apps/web
     buildCommand: npm ci && npm run build
-    staticPublishPath: apps/web/dist
+    staticPublishPath: dist
     routes:
       - type: rewrite
         source: /*
