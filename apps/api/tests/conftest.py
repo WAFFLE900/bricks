@@ -13,6 +13,7 @@ if str(ROOT) not in sys.path:
 import os
 
 os.environ["DATABASE_URL"] = "sqlite://"
+os.environ["APP_ENV"] = "test"
 os.environ["SECRET_KEY"] = "test-secret"
 os.environ["WEB_BASE_URL"] = "http://localhost:5173"
 os.environ["GOOGLE_CLIENT_ID"] = "google-client-id"
