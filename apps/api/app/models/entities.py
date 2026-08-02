@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import date, datetime
 
-from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, String, UniqueConstraint, func
+from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, LargeBinary, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base
@@ -142,7 +142,10 @@ class TextBox(Base):
     __tablename__ = "textBox"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    textBox_content: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    textBox_content: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Durable CRDT snapshot (opaque Yjs update blob) backing the in-process collaboration
+    # room so a reconnecting/cold client rehydrates from Postgres after restart/spindown.
+    textBox_crdt_state: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
     record_id: Mapped[int] = mapped_column(ForeignKey("record.id", ondelete="CASCADE"))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 

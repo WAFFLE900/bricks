@@ -1,0 +1,11 @@
+# Normalize line endings so Windows checkouts (core.autocrlf=true) don't corrupt
+# shell scripts copied into Linux containers. A CRLF shebang (`#!/bin/sh\r`) makes
+# the kernel fail with "exec: no such file or directory".
+* text=auto eol=lf
+
+# Shell scripts must always be LF (they run inside the api/web containers).
+*.sh text eol=lf
+
+# Windows-only files stay CRLF.
+*.bat text eol=crlf
+*.cmd text eol=crlf
