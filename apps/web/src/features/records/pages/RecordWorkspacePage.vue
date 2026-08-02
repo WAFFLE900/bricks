@@ -122,6 +122,7 @@
               <RecordTextBlockCard
                 v-for="textBox in recordsStore.selectedRecord.text_boxes"
                 :key="textBox.id"
+                :can-edit="canEditContent"
                 :text-box="textBox"
               />
               <div v-if="!recordsStore.selectedRecord.text_boxes.length" class="records-page__empty">

@@ -15,7 +15,8 @@
     "axios": "^1.7.7",
     "pinia": "^2.2.4",
     "vue": "^3.5.12",
-    "vue-router": "^4.4.5"
+    "vue-router": "^4.4.5",
+    "yjs": "^13.6.20"
   },
   "devDependencies": {
     "@playwright/test": "^1.48.2",

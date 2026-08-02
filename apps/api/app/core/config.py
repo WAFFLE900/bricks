@@ -13,6 +13,9 @@ class Settings(BaseSettings):
     secret_key: str = "change-me"
     access_token_expire_minutes: int = 60 * 24 * 30
     database_url: str
+    # Debounce window before an in-process collaboration room flushes its converged
+    # CRDT snapshot + materialised text back to Postgres (F5).
+    collab_snapshot_debounce_seconds: float = 1.5
     cors_origins: str = "http://localhost:5173,http://localhost:8080"
     web_base_url: str = "http://localhost:5173"
     google_client_id: str = ""

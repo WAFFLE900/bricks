@@ -1,0 +1,41 @@
+{
+  "iteration": 2,
+  "met": true,
+  "commands": {
+    "buildCmd": "docker compose build api web",
+    "testCmd": "cd apps/api; uv run pytest; cd ../web; npm run test",
+    "devCmd": "docker compose up -d"
+  },
+  "acceptanceChecks": [
+    "docker compose build api web 成功產出映像",
+    "docker compose up -d 讓 postgres/api/web 都以 healthy 啟動",
+    "後端提供 Yjs 即時協作 endpoint（WebSocket）可接受連線並廣播更新",
+    "兩個客戶端編輯同一筆 record 的同一區塊時最終文件狀態一致（CRDT 收斂、離線後重連可合併）",
+    "前端 records 頁能連上協作 endpoint 並反映他人即時編輯",
+    "既有 apps/api 單元測試仍通過"
+  ],
+  "lastBuild": {
+    "ok": true,
+    "errors": [],
+    "logTail": "#29 [web build 6/6] RUN npm run build\n#29 7.669 dist/assets/index-BOXZJwUx.js  141.77 kB │ gzip: 54.97 kB\n#29 7.669 ✓ built in 2.45s\n#29 DONE 8.0s\n#31 [web stage-1 3/3] COPY --from=build /app/dist /usr/share/nginx/html DONE\n#32 [web] naming to docker.io/library/feat-realtime-collab-web DONE 0.2s\n(api image: sha256:fc949f1672... built OK; web image: sha256:74c750873300... built OK)"
+  },
+  "lastTest": {
+    "ok": true,
+    "total": 11,
+    "failed": 0,
+    "failures": []
+  },
+  "acceptance": {
+    "met": true,
+    "score": 0.85,
+    "note": "Feature is functionally complete and high quality. Verified live: after fixing an environmental line-ending artifact, postgres/api/web all reach healthy; the Yjs WS endpoint (/api/v1/ws/text-boxes/{id}) authenticates+broadcasts; and the collab test suite proves CRDT convergence, offline-reconnect merge, and viewer read-only. All 8 api tests pass. Real pycrdt(server)/yjs(client) with a proper state-vector two-step sync handshake, durable snapshot + cold-start rehydration, debounced Postgres flush, mentions re-hooked, and a fully wired frontend (textarea with caret preservation, presence, reconnect backoff). Sole blocker on check 2 is a CRLF checkout artifact, not a defect in the feature code.",
+    "gaps": [
+      {"claim":"docker compose up -d fails out-of-the-box: bricks-api exits with 'exec /app/entrypoint.sh: no such file or directory' because apps/api/entrypoint.sh is checked out with CRLF line endings (shebang '#!/bin/sh\\r'). The committed blob is correct LF, but core.autocrlf=true on Windows mangles it and the repo has no .gitattributes ('*.sh text eol=lf') to guard it. Converting to LF + rebuild makes all three containers healthy. Pre-existing repo-hygiene issue affecting main equally, not introduced by this feature, but it does break acceptance check 2 on a Windows checkout.","severity":"med"},
+      {"claim":"Check 5 (frontend records page connects to the collab endpoint and reflects other users' live edits) was verified only by code review, not in a live browser; the client wiring (useTextBoxCollaboration/collab.client.ts/RecordTextBlockCard) is complete and coherent but not exercised end-to-end against the running WS in a browser during this evaluation.","severity":"low"}
+    ]
+  },
+  "priorDiagnosis": [
+    {"claim":"acceptance gap: docker compose up -d fails out-of-the-box: bricks-api exits with 'exec /app/entrypoint.sh: no such file or directory' because apps/api/entrypoint.sh is checked out with CRLF line endings (shebang '#!/bin/sh\\r'). The committed blob is correct LF, but core.autocrlf=true on Windows mangles it and the repo has no .gitattributes ('*.sh text eol=lf') to guard it. Converting to LF + rebuild makes all three containers healthy. Pre-existing repo-hygiene issue affecting main equally, not introduced by this feature, but it does break acceptance check 2 on a Windows checkout.","severity":"med"},
+    {"claim":"acceptance gap: Check 5 (frontend records page connects to the collab endpoint and reflects other users' live edits) was verified only by code review, not in a live browser; the client wiring (useTextBoxCollaboration/collab.client.ts/RecordTextBlockCard) is complete and coherent but not exercised end-to-end against the running WS in a browser during this evaluation.","severity":"low"}
+  ]
+}

@@ -1,19 +1,16 @@
 from __future__ import annotations
 
-import re
-
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy.orm import Session, selectinload
 
 from app.api.deps import get_current_user
 from app.api.project_access import get_project_access, require_project_editor
 from app.db.session import get_db
-from app.models.entities import Notification, Project, ProjectMembership, Record, TextBox, User
+from app.models.entities import Record, TextBox, User
 from app.schemas.record import RecordCreate, RecordRead, RecordTrashUpdate, RecordUpdate, TextBoxCreate, TextBoxRead, TextBoxUpdate
+from app.services.mentions import notify_new_mentions
 
 router = APIRouter()
-
-MENTION_SUFFIX_PATTERN = r"(?=$|[\s,.;:!?，。；：！？、)\]}）】])"
 
 
 def _record_or_404(db: Session, record_id: int) -> Record:
@@ -53,84 +50,6 @@ def _serialize_record(record: Record) -> RecordRead:
         tags=tags,
         text_boxes=text_boxes,
     )
-
-
-def _project_users(project: Project) -> list[User]:
-    members = [project.user]
-    members.extend(item.user for item in project.memberships)
-    return members
-
-
-def _mention_aliases(user: User) -> list[str]:
-    aliases = [user.user_name.strip(), user.user_email.strip()]
-    email_prefix = user.user_email.split("@", 1)[0].strip()
-    if email_prefix:
-        aliases.append(email_prefix)
-
-    deduped: list[str] = []
-    seen = set()
-    for alias in aliases:
-        normalized = alias.casefold()
-        if not alias or normalized in seen:
-            continue
-        seen.add(normalized)
-        deduped.append(alias)
-    return deduped
-
-
-def _extract_mentioned_users(content: str | None, project: Project) -> list[User]:
-    if not content:
-        return []
-
-    mentioned: list[User] = []
-    seen_user_ids: set[int] = set()
-
-    for user in _project_users(project):
-        for alias in _mention_aliases(user):
-            pattern = rf"@{re.escape(alias)}{MENTION_SUFFIX_PATTERN}"
-            if re.search(pattern, content, flags=re.IGNORECASE):
-                if user.id not in seen_user_ids:
-                    mentioned.append(user)
-                    seen_user_ids.add(user.id)
-                break
-
-    return mentioned
-
-
-def _build_excerpt(content: str | None) -> str:
-    if not content:
-        return ""
-    return re.sub(r"\s+", " ", content).strip()[:80]
-
-
-def _notify_new_mentions(
-    db: Session,
-    *,
-    actor: User,
-    project: Project,
-    record: Record,
-    content: str | None,
-    previous_content: str | None = None,
-) -> None:
-    current_mentions = {user.id: user for user in _extract_mentioned_users(content, project) if user.id != actor.id}
-    previous_mentions = {user.id for user in _extract_mentioned_users(previous_content, project)}
-    new_user_ids = set(current_mentions) - previous_mentions
-    if not new_user_ids:
-        return
-
-    excerpt = _build_excerpt(content)
-    for user_id in new_user_ids:
-        user = current_mentions[user_id]
-        db.add(
-            Notification(
-                recipient_user_id=user.id,
-                actor_user_id=actor.id,
-                project_id=project.id,
-                notification_type="text_box_mention",
-                notification_title=f"{actor.user_name} 在會議記錄提及了你",
-                notification_body=f"專案《{project.project_name}》／《{record.record_name}》：{excerpt}",
-            )
-        )
 
 
 @router.get("/projects/{project_id}/records", response_model=list[RecordRead])
@@ -249,7 +168,7 @@ def create_text_box(
     text_box = TextBox(record_id=record_id, **payload.model_dump())
     db.add(text_box)
     db.flush()
-    _notify_new_mentions(
+    notify_new_mentions(
         db,
         actor=current_user,
         project=access.project,
@@ -284,7 +203,7 @@ def update_text_box(
     text_box.textBox_content = payload.textBox_content
     db.add(text_box)
     db.flush()
-    _notify_new_mentions(
+    notify_new_mentions(
         db,
         actor=current_user,
         project=access.project,
